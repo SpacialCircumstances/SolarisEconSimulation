@@ -1,4 +1,5 @@
-﻿open System
+﻿open System.IO
+open CsvHelper
 
 type Planet = {
     terraform: int
@@ -20,6 +21,8 @@ type Entry = {
 }
 
 let ticksPerTurn = 24
+
+let turns = 10
 
 let terraform player = if player.planet.worldBuilder then
                             { player with planet = { player.planet with terraform = player.planet.terraform + ticksPerTurn } }
@@ -44,7 +47,12 @@ let simulate player turns =
     let update (player, entries) turnNumber = 
         let (newPlayer, newEntry) = turn player turnNumber
         (newPlayer, newEntry :: entries)
-    seq { 1 .. turns } |> Seq.fold update (player, []) |> fst
+    seq { 1 .. turns } |> Seq.fold update (player, []) |> snd
+
+let writeToCsv entries (name: string) =
+    use writer = new StreamWriter(name)
+    use csv = new CsvWriter(writer, System.Globalization.CultureInfo.InvariantCulture)
+    csv.WriteRecords(entries)
 
 [<EntryPoint>]
 let main argv =
@@ -66,4 +74,8 @@ let main argv =
             worldBuilder = false
         }
     }
-    let logs1 = seq { 1 .. 10 } |> Seq.fold (fun (player, entries) -> (player, entries)) (player1, [])
+    let logs1 = simulate player1 turns
+    let logs2 = simulate player2 turns
+    writeToCsv logs1 "player1.csv"
+    writeToCsv logs2 "player2.csv"
+    0
