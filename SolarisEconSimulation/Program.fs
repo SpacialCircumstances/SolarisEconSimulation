@@ -24,11 +24,25 @@ let ticksPerTurn = 24
 
 let turns = 10
 
+let expenseConfig = 1
+
+let costMultiplier = 1
+
 let terraform player = if player.planet.worldBuilder then
                             { player with planet = { player.planet with terraform = player.planet.terraform + ticksPerTurn } }
                         else player
 
-let upgrade player = player
+let calcUpgradeCosts (planet: Planet) = (expenseConfig * costMultiplier * (planet.economy + 1) |> double) / ((planet.terraform |> double) * 0.01) |> floor |> int
+
+let rec upgradePlanet (planet: Planet) credits =
+    let upgradeCost = calcUpgradeCosts planet
+    if upgradeCost < credits then
+        upgradePlanet { planet with economy = planet.economy + 1 } (credits - upgradeCost)
+    else (planet, credits)
+
+let upgrade player = 
+    let (newPlanet, newCredits) = upgradePlanet player.planet player.credits
+    { player with planet = newPlanet; credits = newCredits }
 
 let produce (player: Player) = { player with credits = player.credits + (player.planet.economy * 10) }
 
