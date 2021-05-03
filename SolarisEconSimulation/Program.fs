@@ -50,21 +50,19 @@ let upgrade player =
 
 let produce (player: Player) = { player with credits = player.credits + (player.planet.economy * 10) }
 
+let snapshot player turn = { turn = turn; economy = player.planet.economy; credits = player.credits }
+
 let turn player number = 
     // WB upgrade? -> build econ -> produce credits
     let newPlayer = player |> terraform |> upgrade |> produce
-    let entry = {
-        turn = number;
-        economy = newPlayer.planet.economy;
-        credits = newPlayer.credits
-    }
-    (newPlayer, entry)
+    (newPlayer, snapshot newPlayer)
     
 let simulate player turns = 
     let update (player, entries) turnNumber = 
         let (newPlayer, newEntry) = turn player turnNumber
         (newPlayer, newEntry :: entries)
-    seq { 1 .. turns } |> Seq.fold update (player, []) |> snd
+    let start = [snapshot player]
+    seq { 1 .. turns } |> Seq.fold update (player, start) |> snd
 
 let writeToCsv entries (name: string) =
     use writer = new StreamWriter(name)
@@ -93,6 +91,4 @@ let main argv =
     }
     let logs1 = simulate player1 turns
     let logs2 = simulate player2 turns
-    writeToCsv logs1 "with_wb.csv"
-    writeToCsv logs2 "conventional.csv"
     0
