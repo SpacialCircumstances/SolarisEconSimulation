@@ -41,6 +41,10 @@ type TickInfo =
     | Turn of int * int
     | Tick of int
 
+let isLastTickBeforeTurn tickInfo = match tickInfo with
+                                        | Turn _ -> false
+                                        | Tick t -> (t + 1) % ticksPerTurn = 0
+
 let tickOnPlanet planet = if planet.worldBuilder then
                                 { planet with terraform = planet.terraform + 1 }
                             else planet
@@ -86,23 +90,24 @@ let snapshotEconomy player tickInfo =
         | Tick t -> None
         | Turn (tick, _) -> Some { tick = tick; data = totalEconomy player }
 
-let performTurn number player = player |> upgrade |> produce
+let performTurn number player = player |> produce
     
 let performTick tickNumber player = player |> terraform |> research
     
-let tick player tickInfo =
-    match tickInfo with
-        | Tick t -> performTick t player
-        | Turn (tick, turn) -> performTick tick player |> performTurn turn
+let tick player tickInfo robot =
+    let afterTick = match tickInfo with
+                        | Tick t -> performTick t player
+                        | Turn (tick, turn) -> performTick tick player |> performTurn turn
+    Seq.fold (fun p action -> action p) afterTick (robot tickInfo afterTick)
     
-let simulate player turns snapshot = 
+let simulate player turns snapshot robot = 
     let update (player, entries) tickNumber =
         let tickInfo = if tickNumber % ticksPerTurn = 0 then
                                     let turnNumber = tickNumber / ticksPerTurn
                                     Turn (tickNumber, turnNumber)
                                 else
                                     Tick tickNumber
-        let player = tick player tickInfo
+        let player = tick player tickInfo robot
         match snapshot player tickInfo with
             | None -> (player, entries)
             | Some e -> (player, e :: entries)
@@ -111,6 +116,16 @@ let simulate player turns snapshot =
                     | Some e -> [e]
     let ticks = turns * ticksPerTurn
     seq { 1 .. ticks } |> Seq.fold update (player, start) |> snd
+
+let worldbuilderBot tickInfo player =
+    match tickInfo with
+        | Turn _ -> Seq.empty //TODO: BUILD WBS here
+        | _ when isLastTickBeforeTurn tickInfo -> Seq.ofList [ upgrade ]
+        | _ -> Seq.empty
+
+let normalBot tickInfo player = if isLastTickBeforeTurn tickInfo then
+                                    Seq.ofList [ upgrade ]
+                                else Seq.empty
 
 let writeToCsv entries (name: string) =
     use writer = new StreamWriter(name)
@@ -146,7 +161,7 @@ let main argv =
         planets = Seq.init 10 (fun _ -> genPlanet false) |> Seq.toList
     }
     let layout = Layout(title = "Economy", xaxis = Xaxis(title = "Ticks"), yaxis = Yaxis(title = "Economy"))
-    let logs1 = simulate player1 turns snapshotEconomy
-    let logs2 = simulate player2 turns snapshotEconomy
+    let logs1 = simulate player1 turns snapshotEconomy worldbuilderBot
+    let logs2 = simulate player2 turns snapshotEconomy normalBot
     [ diagramTicksAndData logs1 "With WB"; diagramTicksAndData logs2 "Without WB" ] |> Chart.Plot |> Chart.WithLayout layout |> Chart.Show
     0
