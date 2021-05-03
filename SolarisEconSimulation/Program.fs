@@ -16,10 +16,9 @@ type Player = {
     researchPoints: int
 }
 
-type Entry = {
-    turn: int
-    credits: int
-    economy: int
+type Entry<'a> = {
+    tick: int
+    data: 'a
 }
 
 let economyStart = 5
@@ -85,7 +84,7 @@ let research (player: Player) =
 let snapshotEconomy player tickInfo =
     match tickInfo with
         | Tick t -> None
-        | Turn (tick, turn) -> Some { turn = turn; economy = totalEconomy player; credits = player.credits }
+        | Turn (tick, _) -> Some { tick = tick; data = totalEconomy player }
 
 let performTurn number player = player |> upgrade |> produce
     
@@ -118,10 +117,12 @@ let writeToCsv entries (name: string) =
     use csv = new CsvWriter(writer, System.Globalization.CultureInfo.InvariantCulture)
     csv.WriteRecords(entries)
 
-let toEconPlot entries name =
-    let turns = Seq.map (fun e -> e.turn) entries
-    let econ = Seq.map (fun e -> e.economy) entries
-    Scatter(x = turns, y = econ, name = name)
+let diagram projX projY entries name =
+    let xvals = Seq.map projX entries
+    let yvals = Seq.map projY entries
+    Scatter(x = xvals, y = yvals, name = name)
+
+let diagramTicksAndData = diagram (fun e -> e.tick) (fun e -> e.data)
 
 let genPlanet wb = {
     terraform = terraformingStart
@@ -144,8 +145,8 @@ let main argv =
         credits = 10000
         planets = Seq.init 10 (fun _ -> genPlanet false) |> Seq.toList
     }
+    let layout = Layout(title = "Economy", xaxis = Xaxis(title = "Turns"), yaxis = Yaxis(title = "Economy"))
     let logs1 = simulate player1 turns snapshotEconomy
     let logs2 = simulate player2 turns snapshotEconomy
-    let layout = Layout(title = "Economy", xaxis = Xaxis(title = "Turns"), yaxis = Yaxis(title = "Economy"))
-    [ toEconPlot logs1 "With WB"; toEconPlot logs2 "Without WB" ] |> Chart.Plot |> Chart.WithLayout layout |> Chart.Show
+    [ diagramTicksAndData logs1 "With WB"; diagramTicksAndData logs2 "Without WB" ] |> Chart.Plot |> Chart.WithLayout layout |> Chart.Show
     0
