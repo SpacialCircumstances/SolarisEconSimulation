@@ -22,17 +22,17 @@ type Entry = {
 
 let ticksPerTurn = 24
 
-let turns = 10
+let turns = 20
 
-let expenseConfig = 1
+let expenseConfig = 2
 
-let costMultiplier = 1
+let costMultiplier = 2.5
 
 let terraform player = if player.planet.worldBuilder then
                             { player with planet = { player.planet with terraform = player.planet.terraform + ticksPerTurn } }
                         else player
 
-let calcUpgradeCosts (planet: Planet) = (expenseConfig * costMultiplier * (planet.economy + 1) |> double) / ((planet.terraform |> double) * 0.01) |> floor |> int
+let calcUpgradeCosts (planet: Planet) = ((float expenseConfig) * costMultiplier * (planet.economy + 1 |> float)) / ((planet.terraform |> float) * 0.01) |> floor |> int
 
 let rec upgradePlanet (planet: Planet) credits =
     let upgradeCost = calcUpgradeCosts planet
