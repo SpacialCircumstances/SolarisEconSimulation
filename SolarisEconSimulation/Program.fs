@@ -145,7 +145,7 @@ let main argv =
         credits = 10000
         planets = Seq.init 10 (fun _ -> genPlanet false) |> Seq.toList
     }
-    let layout = Layout(title = "Economy", xaxis = Xaxis(title = "Turns"), yaxis = Yaxis(title = "Economy"))
+    let layout = Layout(title = "Economy", xaxis = Xaxis(title = "Ticks"), yaxis = Yaxis(title = "Economy"))
     let logs1 = simulate player1 turns snapshotEconomy
     let logs2 = simulate player2 turns snapshotEconomy
     [ diagramTicksAndData logs1 "With WB"; diagramTicksAndData logs2 "Without WB" ] |> Chart.Plot |> Chart.WithLayout layout |> Chart.Show
