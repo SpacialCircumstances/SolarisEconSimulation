@@ -82,7 +82,10 @@ let research (player: Player) =
     let (rp, level) = researchTerraforming player.terraformingLevel researchPoints
     { player with researchPoints = rp; terraformingLevel = level }
 
-let snapshot player turn = { turn = turn; economy = totalEconomy player; credits = player.credits }
+let snapshotEconomy player tickInfo =
+    match tickInfo with
+        | Tick t -> None
+        | Turn (tick, turn) -> Some { turn = turn; economy = totalEconomy player; credits = player.credits }
 
 let performTurn number player = player |> upgrade |> produce
     
@@ -93,18 +96,20 @@ let tick player tickInfo =
         | Tick t -> performTick t player
         | Turn (tick, turn) -> performTick tick player |> performTurn turn
     
-let simulate player turns = 
+let simulate player turns snapshot = 
     let update (player, entries) tickNumber =
-        let (player, entry) = if tickNumber % ticksPerTurn = 0 then
+        let tickInfo = if tickNumber % ticksPerTurn = 0 then
                                     let turnNumber = tickNumber / ticksPerTurn
-                                    let newPlayer = Turn (tickNumber, turnNumber) |> tick player
-                                    (newPlayer, snapshot newPlayer turnNumber |> Some)
+                                    Turn (tickNumber, turnNumber)
                                 else
-                                    (Tick tickNumber |> tick player, None)
-        match entry with
+                                    Tick tickNumber
+        let player = tick player tickInfo
+        match snapshot player tickInfo with
             | None -> (player, entries)
             | Some e -> (player, e :: entries)
-    let start = [snapshot player 0]
+    let start = match snapshot player (Tick 0) with
+                    | None -> []
+                    | Some e -> [e]
     let ticks = turns * ticksPerTurn
     seq { 1 .. ticks } |> Seq.fold update (player, start) |> snd
 
@@ -113,7 +118,7 @@ let writeToCsv entries (name: string) =
     use csv = new CsvWriter(writer, System.Globalization.CultureInfo.InvariantCulture)
     csv.WriteRecords(entries)
 
-let toPlot entries name =
+let toEconPlot entries name =
     let turns = Seq.map (fun e -> e.turn) entries
     let econ = Seq.map (fun e -> e.economy) entries
     Scatter(x = turns, y = econ, name = name)
@@ -139,8 +144,8 @@ let main argv =
         credits = 10000
         planets = Seq.init 10 (fun _ -> genPlanet false) |> Seq.toList
     }
-    let logs1 = simulate player1 turns
-    let logs2 = simulate player2 turns
+    let logs1 = simulate player1 turns snapshotEconomy
+    let logs2 = simulate player2 turns snapshotEconomy
     let layout = Layout(title = "Economy", xaxis = Xaxis(title = "Turns"), yaxis = Yaxis(title = "Economy"))
-    [ toPlot logs1 "With WB"; toPlot logs2 "Without WB" ] |> Chart.Plot |> Chart.WithLayout layout |> Chart.Show
+    [ toEconPlot logs1 "With WB"; toEconPlot logs2 "Without WB" ] |> Chart.Plot |> Chart.WithLayout layout |> Chart.Show
     0
