@@ -78,7 +78,7 @@ let rec researchTerraforming level rp =
 
 let research (player: Player) =
     let researchPoints = player.researchPoints + totalResearch player
-    let (rp, level) = researchTerraforming player.terraformingLevel researchPoints
+    let (level, rp) = researchTerraforming player.terraformingLevel researchPoints
     { player with researchPoints = rp; terraformingLevel = level }
 
 let snapshotEconomy player tickInfo =
