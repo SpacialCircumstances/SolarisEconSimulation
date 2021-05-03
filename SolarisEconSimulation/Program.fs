@@ -8,17 +8,21 @@ type Planet = {
 }
 
 type Player = {
-    name: string
     credits: int
     planet: Planet
 }
 
 type Entry = {
-    name: string
+    turn: int
     credits: int
     economy: int
-    turn: int
 }
+
+let economyStart = 5
+
+let terraformingStart = 10
+
+let terraformingLevel = 10
 
 let ticksPerTurn = 24
 
@@ -50,10 +54,9 @@ let turn player number =
     // WB upgrade? -> build econ -> produce credits
     let newPlayer = player |> terraform |> upgrade |> produce
     let entry = {
-        name = player.name;
         turn = number;
-        economy = player.planet.economy;
-        credits = player.credits
+        economy = newPlayer.planet.economy;
+        credits = newPlayer.credits
     }
     (newPlayer, entry)
     
@@ -70,26 +73,26 @@ let writeToCsv entries (name: string) =
 
 [<EntryPoint>]
 let main argv =
+    let terraformTotal = terraformingStart + (terraformingLevel * 5)
+    
     let player1 = {
-        name = "WB player"
         credits = 0
         planet = {
-            terraform = 10
-            economy = 5
+            terraform = terraformTotal
+            economy = economyStart
             worldBuilder = true
         }
     }
     let player2 = {
-        name = "Conventional"
         credits = 1000
         planet = {
-            terraform = 10
-            economy = 5
+            terraform = terraformTotal
+            economy = economyStart
             worldBuilder = false
         }
     }
     let logs1 = simulate player1 turns
     let logs2 = simulate player2 turns
-    writeToCsv logs1 "player1.csv"
-    writeToCsv logs2 "player2.csv"
+    writeToCsv logs1 "with_wb.csv"
+    writeToCsv logs2 "conventional.csv"
     0
