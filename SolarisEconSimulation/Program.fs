@@ -21,15 +21,17 @@ type Entry<'a> = {
     data: 'a
 }
 
+let worldBuilderPrice = 1000
+
 let economyStart = 5
 
 let researchStart = 1
 
-let terraformingStart = 10
+let terraformingStart = 30
 
 let ticksPerTurn = 24
 
-let turns = 20
+let turns = 50
 
 let expenseConfig = 2
 
@@ -44,6 +46,10 @@ type TickInfo =
 let isLastTickBeforeTurn tickInfo = match tickInfo with
                                         | Turn _ -> false
                                         | Tick t -> (t + 1) % ticksPerTurn = 0
+
+let getTick tickInfo = match tickInfo with
+                        | Turn (t, _) -> t
+                        | Tick t -> t
 
 let tickOnPlanet planet = if planet.worldBuilder then
                                 { planet with terraform = planet.terraform + 1 }
@@ -67,6 +73,19 @@ let upgrade (player: Player) =
     let (planets, credits) = Seq.mapFold (fun cr planet -> upgradePlanet player planet cr) player.credits player.planets
     { player with planets = Seq.toList planets; credits = credits }
 
+let buildWorldBuilder player =
+    let folder built planet =
+        if not built && not planet.worldBuilder then
+            ({ planet with worldBuilder = true }, true)
+        else (planet, built)
+    
+    if player.credits > worldBuilderPrice then
+        let (planets, built) = List.mapFold folder false player.planets
+        if built then
+            { player with planets = planets; credits = player.credits - worldBuilderPrice }
+        else player
+    else player
+
 let totalEconomy player = Seq.map (fun (p: Planet) -> p.economy) player.planets |> Seq.sum
 
 let totalResearch player = Seq.map (fun (p: Planet) -> p.research) player.planets |> Seq.sum
@@ -89,6 +108,15 @@ let snapshotEconomy player tickInfo =
     match tickInfo with
         | Tick t -> None
         | Turn (tick, _) -> Some { tick = tick; data = totalEconomy player }
+
+let snapshotWorldBuilders player tickInfo =
+    Some { tick = getTick tickInfo; data = player.planets |> Seq.filter (fun p -> p.worldBuilder) |> Seq.length }
+
+let combineSnapshots sn1 sn2 =
+    fun player tickInfo ->
+        let sn1 = sn1 player tickInfo
+        let sn2 = sn2 player tickInfo
+        Option.map2 (fun s1 s2 -> { tick = s1.tick; data = (s1.data, s2.data) }) sn1 sn2
 
 let performTurn number player = player |> produce
     
@@ -118,10 +146,13 @@ let simulate player turns snapshot robot =
     seq { 1 .. ticks } |> Seq.fold update (player, start) |> snd
 
 let worldbuilderBot tickInfo player =
-    match tickInfo with
-        | Turn _ -> Seq.empty //TODO: BUILD WBS here
-        | _ when isLastTickBeforeTurn tickInfo -> Seq.ofList [ upgrade ]
-        | _ -> Seq.empty
+    seq {
+        match tickInfo with
+            | Turn _ -> if player.credits > worldBuilderPrice then yield buildWorldBuilder else ()
+            | _ when isLastTickBeforeTurn tickInfo -> yield upgrade
+            | _ -> ()
+    }
+
 
 let normalBot tickInfo player = if isLastTickBeforeTurn tickInfo then
                                     Seq.ofList [ upgrade ]
@@ -136,9 +167,7 @@ let diagram projX projY entries name =
     let xvals = Seq.map projX entries
     let yvals = Seq.map projY entries
     Scatter(x = xvals, y = yvals, name = name)
-
-let diagramTicksAndData = diagram (fun e -> e.tick) (fun e -> e.data)
-
+    
 let genPlanet wb = {
     terraform = terraformingStart
     economy = economyStart
@@ -148,20 +177,21 @@ let genPlanet wb = {
 
 [<EntryPoint>]
 let main argv =    
-    let player1 = {
+    let player = {
         terraformingLevel = 1
         researchPoints = 0
-        credits = 0
-        planets = Seq.init 10 (fun _ -> genPlanet true) |> Seq.toList
-    }
-    let player2 = {
-        terraformingLevel = 1
-        researchPoints = 0
-        credits = 10000
-        planets = Seq.init 10 (fun _ -> genPlanet false) |> Seq.toList
+        credits = 4000
+        planets = Seq.init 40 (fun _ -> genPlanet false) |> Seq.toList
     }
     let layout = Layout(title = "Economy", xaxis = Xaxis(title = "Ticks"), yaxis = Yaxis(title = "Economy"))
-    let logs1 = simulate player1 turns snapshotEconomy worldbuilderBot
-    let logs2 = simulate player2 turns snapshotEconomy normalBot
-    [ diagramTicksAndData logs1 "With WB"; diagramTicksAndData logs2 "Without WB" ] |> Chart.Plot |> Chart.WithLayout layout |> Chart.Show
+    let snapshot = combineSnapshots snapshotEconomy snapshotWorldBuilders
+    let logs1 = simulate player turns snapshot worldbuilderBot
+    let logs2 = simulate player turns snapshot normalBot
+    let diagramTicks = diagram (fun (e: Entry<_>) -> e.tick)
+    [
+        diagramTicks (fun e -> e.data |> fst) logs1 "Economy (with WB)"
+        diagramTicks (fun e -> e.data |> fst) logs2 "Economy (without WB)"
+        diagramTicks (fun e -> e.data |> snd) logs1 "World builders (with WB)"
+        diagramTicks (fun e -> e.data |> snd) logs2 "World builders (without WB)"
+    ] |> Chart.Plot |> Chart.WithLayout layout |> Chart.Show
     0
