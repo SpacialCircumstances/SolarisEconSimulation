@@ -1,5 +1,6 @@
 ﻿open System.IO
 open CsvHelper
+open XPlot.Plotly
 
 type Planet = {
     terraform: int
@@ -55,19 +56,24 @@ let snapshot player turn = { turn = turn; economy = player.planet.economy; credi
 let turn player number = 
     // WB upgrade? -> build econ -> produce credits
     let newPlayer = player |> terraform |> upgrade |> produce
-    (newPlayer, snapshot newPlayer)
+    (newPlayer, snapshot newPlayer number)
     
 let simulate player turns = 
     let update (player, entries) turnNumber = 
         let (newPlayer, newEntry) = turn player turnNumber
         (newPlayer, newEntry :: entries)
-    let start = [snapshot player]
+    let start = [snapshot player 0]
     seq { 1 .. turns } |> Seq.fold update (player, start) |> snd
 
 let writeToCsv entries (name: string) =
     use writer = new StreamWriter(name)
     use csv = new CsvWriter(writer, System.Globalization.CultureInfo.InvariantCulture)
     csv.WriteRecords(entries)
+
+let toPlot entries name =
+    let turns = Seq.map (fun e -> e.turn) entries
+    let econ = Seq.map (fun e -> e.economy) entries
+    Scatter(x = turns, y = econ, name = name)
 
 [<EntryPoint>]
 let main argv =
@@ -91,4 +97,6 @@ let main argv =
     }
     let logs1 = simulate player1 turns
     let logs2 = simulate player2 turns
+    let layout = Layout(title = "Economy", xaxis = Xaxis(title = "Turns"), yaxis = Yaxis(title = "Economy"))
+    [ toPlot logs1 "With WB"; toPlot logs2 "Without WB" ] |> Chart.Plot |> Chart.WithLayout layout |> Chart.Show
     0
