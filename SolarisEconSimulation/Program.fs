@@ -67,6 +67,10 @@ let tickOnPlanet planet = if planet.worldBuilder then
                                 { planet with terraform = planet.terraform + 1 }
                             else planet
 
+let totalEconomy player = Seq.map (fun (p: Planet) -> p.economy) player.planets |> Seq.sum
+
+let totalResearch player = Seq.map (fun (p: Planet) -> p.research) player.planets |> Seq.sum
+
 let terraform (player: Player) =
     let planets = List.map tickOnPlanet player.planets
     { player with planets = planets }
@@ -91,16 +95,37 @@ let upgradePlanetResearch player (planet: Planet) credits =
         { planet with research = planet.research + 1 }, credits - upgradeCost
     else (planet, credits)
 
-let upgradeEconomy (player: Player) =
+let rec upgradeGroup player groups credits =
     let upgradePlanet credits planet =
         let upgradeCost = calcEconomyUpgradeCosts player planet
         if upgradeCost <= credits then
             { planet with economy = planet.economy + 1 }, credits - upgradeCost
         else (planet, credits)
-    let upgradeGroup credits group = Seq.mapFold upgradePlanet credits group
-    let grouped = player.planets |> Seq.groupBy (calcEconomyUpgradeCosts player) |> Seq.sortBy fst
-    let (planets, credits) = Seq.mapFold (fun credits (_, group) -> upgradeGroup credits group) player.credits grouped
-    { player with planets = planets |> Seq.collect id |> Seq.toList; credits = credits }
+    match groups with
+        | (_, planets) :: rest ->
+            let (planets, credits) = List.mapFold upgradePlanet credits planets
+            let (rest, remaining) = upgradeGroup player rest credits
+            (planets @ rest, remaining)
+        | _ -> ([], credits)
+
+let groupPlanetsByEconomyPrice player planets = planets |> List.groupBy (calcEconomyUpgradeCosts player) |> List.sortBy fst
+
+let rec upgradeUntilImpossible player grouped credits =
+    let (planets, credits) = upgradeGroup player grouped credits
+    let grouped = groupPlanetsByEconomyPrice player planets
+    let first = List.head grouped |> fst
+    if credits >= first then
+        upgradeUntilImpossible player grouped credits
+    else (planets, credits)
+
+let upgradeEconomy (player: Player) =
+    let initialCredits = player.credits
+    let initialEconomy = totalEconomy player
+    let (planets, credits) = upgradeUntilImpossible player (groupPlanetsByEconomyPrice player player.planets) player.credits
+    let player = { player with planets = planets; credits = credits }
+    let newEconomy = totalEconomy player
+    printfn "Before: %i credits, %i economy. After: %i credits, %i economy" initialCredits initialEconomy credits newEconomy
+    player
 
 let upgradeEconomyUntilPrice maxPrice (player: Player) =
     let (planets, credits) = Seq.mapFold (fun cr planet ->
@@ -132,10 +157,6 @@ let buildWorldBuilder player =
             { player with planets = planets; credits = player.credits - worldBuilderPrice }
         else player
     else player
-
-let totalEconomy player = Seq.map (fun (p: Planet) -> p.economy) player.planets |> Seq.sum
-
-let totalResearch player = Seq.map (fun (p: Planet) -> p.research) player.planets |> Seq.sum
 
 let produce (player: Player) =
     { player with credits = player.credits + (totalEconomy player * 10) }
