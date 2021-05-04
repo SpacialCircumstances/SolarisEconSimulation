@@ -20,8 +20,10 @@ type Player = {
 type CurrentData = {
     economy: int
     averageEconomyUpgradePrice: int
+    averageScienceUpgradePrice: int
     science: int
     terraformingLevel: int
+    worldBuilders: int
 }
 
 type Entry<'a> = {
@@ -37,7 +39,7 @@ let researchStart = 1
 
 let terraformingStart = 30
 
-let ticksPerTurn = 24
+let ticksPerTurn = 20
 
 let turns = 50
 
@@ -90,8 +92,15 @@ let upgradePlanetResearch player (planet: Planet) credits =
     else (planet, credits)
 
 let upgradeEconomy (player: Player) =
-    let (planets, credits) = Seq.mapFold (fun cr planet -> upgradePlanetEconomy player planet cr) player.credits player.planets
-    { player with planets = Seq.toList planets; credits = credits }
+    let upgradePlanet credits planet =
+        let upgradeCost = calcEconomyUpgradeCosts player planet
+        if upgradeCost <= credits then
+            { planet with economy = planet.economy + 1 }, credits - upgradeCost
+        else (planet, credits)
+    let upgradeGroup credits group = Seq.mapFold upgradePlanet credits group
+    let grouped = player.planets |> Seq.groupBy (calcEconomyUpgradeCosts player) |> Seq.sortBy fst
+    let (planets, credits) = Seq.mapFold (fun credits (_, group) -> upgradeGroup credits group) player.credits grouped
+    { player with planets = planets |> Seq.collect id |> Seq.toList; credits = credits }
 
 let upgradeEconomyUntilPrice maxPrice (player: Player) =
     let (planets, credits) = Seq.mapFold (fun cr planet ->
@@ -150,7 +159,7 @@ let tick player tickInfo robot =
     let afterTick = match tickInfo with
                         | Tick t -> performTick t player
                         | Turn (tick, turn) -> performTick tick player |> performTurn turn
-    Seq.fold (fun p action -> action p) afterTick (robot tickInfo afterTick)
+    robot tickInfo afterTick
     
 let simulate player turns snapshot robot = 
     let update (player, entries) tickNumber =
@@ -158,7 +167,7 @@ let simulate player turns snapshot robot =
                                     let turnNumber = tickNumber / ticksPerTurn
                                     Turn (tickNumber, turnNumber)
                                 else
-                                    Tick tickNumber
+                                    Tick tickNumber 
         let player = tick player tickInfo robot
         match snapshot player tickInfo with
             | None -> (player, entries)
@@ -170,21 +179,16 @@ let simulate player turns snapshot robot =
     seq { 1 .. ticks } |> Seq.fold update (player, start) |> snd
 
 let worldbuilderBot tickInfo player =
-    seq {
-        match tickInfo with
-            | Turn _ -> if player.credits > worldBuilderPrice then yield buildWorldBuilder else ()
-            | _ when isLastTickBeforeTurn tickInfo -> yield upgradeEconomy
-            | _ -> ()
-    }
-
+    match tickInfo with
+        | Turn _ -> if player.credits > worldBuilderPrice then buildWorldBuilder player else player
+        | _ when isLastTickBeforeTurn tickInfo -> upgradeEconomy player
+        | _ -> player
 
 let normalBot tickInfo player =
-    seq {
-        match tickInfo with
-            | Turn _ -> yield (buyResearchForHalfOfCredits 100)
-            | _ when isLastTickBeforeTurn tickInfo -> yield (upgradeEconomyUntilPrice 60)
-            | _ -> ()
-    }
+    match tickInfo with
+        | Turn _ -> buyResearchForHalfOfCredits 100 player
+        | _ when isLastTickBeforeTurn tickInfo -> upgradeEconomy player
+        | _ -> player
 
 let writeToCsv entries (name: string) =
     use writer = new StreamWriter(name)
@@ -203,6 +207,10 @@ let genPlanet wb = {
     research = researchStart
 }
 
+let plot title (diagrams: Trace list) =
+    let layout = Layout(title = title, xaxis = Xaxis(title = "Ticks"), yaxis = Yaxis(title = title))
+    diagrams |> Chart.Plot |> Chart.WithLayout layout
+
 [<EntryPoint>]
 let main argv =    
     let player = {
@@ -211,21 +219,40 @@ let main argv =
         credits = 4000
         planets = Seq.init 40 (fun _ -> genPlanet false) |> Seq.toList
     }
-    let layout = Layout(title = "Economy", xaxis = Xaxis(title = "Ticks"), yaxis = Yaxis(title = "Economy"))
     let snapshot player tickInfo =
         match tickInfo with
             | Turn (tick, _) ->
                 let economy = totalEconomy player
-                let averagePrice = player.planets |> Seq.map (fun p -> calcEconomyUpgradeCosts player p |> float) |> Seq.average |> int
-                let data = { economy = economy; averageEconomyUpgradePrice = averagePrice; science = totalResearch player; terraformingLevel = player.terraformingLevel }
+                let averageEconomyPrice = player.planets |> Seq.map (fun p -> calcEconomyUpgradeCosts player p |> float) |> Seq.average |> int
+                let averageSciencePrice = player.planets |> Seq.map (fun p -> calcResearchUpgradeCosts player p |> float) |> Seq.average |> int
+                let data = {
+                    economy = economy
+                    averageEconomyUpgradePrice = averageEconomyPrice
+                    averageScienceUpgradePrice = averageSciencePrice
+                    science = totalResearch player
+                    terraformingLevel = player.terraformingLevel
+                    worldBuilders = Seq.filter (fun p -> p.worldBuilder) player.planets |> Seq.length
+                }
                 Some({ tick = tick; data = data })
             | _ -> None
             
     let logs1 = simulate player turns snapshot worldbuilderBot
     let logs2 = simulate player turns snapshot normalBot
     let diagramTicks = diagram (fun (e: Entry<_>) -> e.tick)
-    [
-        diagramTicks (fun e -> e.data.economy) logs1 "Economy (with WB)"
-        diagramTicks (fun e -> e.data.economy) logs2 "Economy (without WB)"
-    ] |> Chart.Plot |> Chart.WithLayout layout |> Chart.Show
+    let infrastructurePlot = plot "Infrastructure" [
+        diagramTicks (fun e -> e.data.economy) logs1 "Economy (with WBs)"
+        diagramTicks (fun e -> e.data.economy) logs2 "Economy (without WBs)"
+        diagramTicks (fun e -> e.data.science) logs1 "Science (with WBs)"
+        diagramTicks (fun e -> e.data.science) logs2 "Science (without WBs)"
+    ]
+    let avgPricePlot = plot "Average price" [
+        diagramTicks (fun e -> e.data.averageEconomyUpgradePrice) logs1 "Economy upgrade (with WBs)"
+        diagramTicks (fun e -> e.data.averageEconomyUpgradePrice) logs2 "Economy upgrade (without WBs)"
+        diagramTicks (fun e -> e.data.averageScienceUpgradePrice) logs1 "Research upgrade (with WBs)"
+        diagramTicks (fun e -> e.data.averageScienceUpgradePrice) logs2 "Research upgrade (without WBs)"
+    ]
+    let wbPlot = plot "World Builders" [
+        diagramTicks (fun e -> e.data.worldBuilders) logs1 "World builders"
+    ]
+    [ infrastructurePlot; avgPricePlot; wbPlot ] |> Chart.ShowAll
     0
