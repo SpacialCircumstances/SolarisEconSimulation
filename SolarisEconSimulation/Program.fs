@@ -43,7 +43,9 @@ let turns = 50
 
 let expenseConfig = 2
 
-let costMultiplier = 2.5
+let costMultiplierEconomy = 2.5
+
+let costMultiplierScience = 20.0
 
 let terraformingBonusPerLevel = 5
 
@@ -67,19 +69,47 @@ let terraform (player: Player) =
     let planets = List.map tickOnPlanet player.planets
     { player with planets = planets }
 
-let totalTerraforming player planet = planet.terraform + (player.terraformingLevel * terraformingBonusPerLevel)
+let totalTerraforming (player: Player) planet = planet.terraform + (player.terraformingLevel * terraformingBonusPerLevel)
 
-let calcUpgradeCosts (player: Player) (planet: Planet) = ((float expenseConfig) * costMultiplier * (planet.economy + 1 |> float)) / ((totalTerraforming player planet |> float) * 0.01) |> floor |> int
 
-let rec upgradePlanet player (planet: Planet) credits =
-    let upgradeCost = calcUpgradeCosts player planet
-    if upgradeCost < credits then
-        upgradePlanet player { planet with economy = planet.economy + 1 } (credits - upgradeCost)
+let calcUpgradeCosts (player: Player) (planet: Planet) level costMultiplier = ((float expenseConfig) * costMultiplier * (level + 1 |> float)) / ((totalTerraforming player planet |> float) * 0.01) |> floor |> int
+let calcEconomyUpgradeCosts (player: Player) (planet: Planet) = calcUpgradeCosts player planet planet.economy costMultiplierEconomy
+
+let calcResearchUpgradeCosts (player: Player) (planet: Planet) = calcUpgradeCosts player planet planet.research costMultiplierScience
+
+let rec upgradePlanetEconomy player (planet: Planet) credits =
+    let upgradeCost = calcEconomyUpgradeCosts player planet
+    if upgradeCost <= credits then
+        upgradePlanetEconomy player { planet with economy = planet.economy + 1 } (credits - upgradeCost)
     else (planet, credits)
 
-let upgrade (player: Player) =
-    let (planets, credits) = Seq.mapFold (fun cr planet -> upgradePlanet player planet cr) player.credits player.planets
+let upgradePlanetResearch player (planet: Planet) credits =
+    let upgradeCost = calcResearchUpgradeCosts player planet
+    if upgradeCost <= credits then
+        { planet with research = planet.research + 1 }, credits - upgradeCost
+    else (planet, credits)
+
+let upgradeEconomy (player: Player) =
+    let (planets, credits) = Seq.mapFold (fun cr planet -> upgradePlanetEconomy player planet cr) player.credits player.planets
     { player with planets = Seq.toList planets; credits = credits }
+
+let upgradeEconomyUntilPrice maxPrice (player: Player) =
+    let (planets, credits) = Seq.mapFold (fun cr planet ->
+                                                let price = calcEconomyUpgradeCosts player planet
+                                                if price <= maxPrice then
+                                                    upgradePlanetEconomy player planet cr
+                                                else (planet, cr)) player.credits player.planets
+    { player with planets = Seq.toList planets; credits = credits }
+
+let buyResearchForHalfOfCredits maxPrice (player: Player) =
+    let availableCredits = player.credits / 2
+    let (planets, remaining) = Seq.mapFold (fun cr planet ->
+                                            let price = calcResearchUpgradeCosts player planet
+                                            if price <= maxPrice then
+                                                upgradePlanetResearch player planet cr
+                                            else (planet, cr)) availableCredits player.planets
+    let newCredits = player.credits - (availableCredits - remaining)
+    { player with planets = Seq.toList planets; credits = newCredits }
 
 let buildWorldBuilder player =
     let folder built planet =
@@ -143,14 +173,18 @@ let worldbuilderBot tickInfo player =
     seq {
         match tickInfo with
             | Turn _ -> if player.credits > worldBuilderPrice then yield buildWorldBuilder else ()
-            | _ when isLastTickBeforeTurn tickInfo -> yield upgrade
+            | _ when isLastTickBeforeTurn tickInfo -> yield upgradeEconomy
             | _ -> ()
     }
 
 
-let normalBot tickInfo player = if isLastTickBeforeTurn tickInfo then
-                                    Seq.ofList [ upgrade ]
-                                else Seq.empty
+let normalBot tickInfo player =
+    seq {
+        match tickInfo with
+            | Turn _ -> yield (buyResearchForHalfOfCredits 100)
+            | _ when isLastTickBeforeTurn tickInfo -> yield (upgradeEconomyUntilPrice 60)
+            | _ -> ()
+    }
 
 let writeToCsv entries (name: string) =
     use writer = new StreamWriter(name)
@@ -182,7 +216,7 @@ let main argv =
         match tickInfo with
             | Turn (tick, _) ->
                 let economy = totalEconomy player
-                let averagePrice = player.planets |> Seq.map (fun p -> calcUpgradeCosts player p |> float) |> Seq.average |> int
+                let averagePrice = player.planets |> Seq.map (fun p -> calcEconomyUpgradeCosts player p |> float) |> Seq.average |> int
                 let data = { economy = economy; averageEconomyUpgradePrice = averagePrice; science = totalResearch player; terraformingLevel = player.terraformingLevel }
                 Some({ tick = tick; data = data })
             | _ -> None
