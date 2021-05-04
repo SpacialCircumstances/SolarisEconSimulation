@@ -112,20 +112,6 @@ let research (player: Player) =
     let (level, rp) = researchTerraforming player.terraformingLevel researchPoints
     { player with researchPoints = rp; terraformingLevel = level }
 
-let snapshotEconomy player tickInfo =
-    match tickInfo with
-        | Tick t -> None
-        | Turn (tick, _) -> Some { tick = tick; data = totalEconomy player }
-
-let snapshotWorldBuilders player tickInfo =
-    Some { tick = getTick tickInfo; data = player.planets |> Seq.filter (fun p -> p.worldBuilder) |> Seq.length }
-
-let combineSnapshots sn1 sn2 =
-    fun player tickInfo ->
-        let sn1 = sn1 player tickInfo
-        let sn2 = sn2 player tickInfo
-        Option.map2 (fun s1 s2 -> { tick = s1.tick; data = (s1.data, s2.data) }) sn1 sn2
-
 let performTurn number player = player |> produce
     
 let performTick tickNumber player = player |> terraform |> research
