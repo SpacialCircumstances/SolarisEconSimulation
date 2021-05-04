@@ -1,4 +1,5 @@
 ﻿open System.IO
+open System.Xml.Schema
 open CsvHelper
 open XPlot.Plotly
 
@@ -14,6 +15,13 @@ type Player = {
     planets: Planet list
     terraformingLevel: int
     researchPoints: int
+}
+
+type CurrentData = {
+    economy: int
+    averageEconomyUpgradePrice: int
+    science: int
+    terraformingLevel: int
 }
 
 type Entry<'a> = {
@@ -184,14 +192,20 @@ let main argv =
         planets = Seq.init 40 (fun _ -> genPlanet false) |> Seq.toList
     }
     let layout = Layout(title = "Economy", xaxis = Xaxis(title = "Ticks"), yaxis = Yaxis(title = "Economy"))
-    let snapshot = combineSnapshots snapshotEconomy snapshotWorldBuilders
+    let snapshot player tickInfo =
+        match tickInfo with
+            | Turn (tick, _) ->
+                let economy = totalEconomy player
+                let averagePrice = player.planets |> Seq.map (fun p -> calcUpgradeCosts player p |> float) |> Seq.average |> int
+                let data = { economy = economy; averageEconomyUpgradePrice = averagePrice; science = totalResearch player; terraformingLevel = player.terraformingLevel }
+                Some({ tick = tick; data = data })
+            | _ -> None
+            
     let logs1 = simulate player turns snapshot worldbuilderBot
     let logs2 = simulate player turns snapshot normalBot
     let diagramTicks = diagram (fun (e: Entry<_>) -> e.tick)
     [
-        diagramTicks (fun e -> e.data |> fst) logs1 "Economy (with WB)"
-        diagramTicks (fun e -> e.data |> fst) logs2 "Economy (without WB)"
-        diagramTicks (fun e -> e.data |> snd) logs1 "World builders (with WB)"
-        diagramTicks (fun e -> e.data |> snd) logs2 "World builders (without WB)"
+        diagramTicks (fun e -> e.data.economy) logs1 "Economy (with WB)"
+        diagramTicks (fun e -> e.data.economy) logs2 "Economy (without WB)"
     ] |> Chart.Plot |> Chart.WithLayout layout |> Chart.Show
     0
