@@ -24,6 +24,7 @@ type CurrentData = {
     science: int
     terraformingLevel: int
     worldBuilders: int
+    planetCount: int
 }
 
 type Entry<'a> = {
@@ -240,7 +241,7 @@ let main argv =
         credits = 4000
         planets = Seq.init 40 (fun _ -> genPlanet false) |> Seq.toList
     }
-    let snapshot player tickInfo =
+    let snapshot (player: Player) tickInfo =
         match tickInfo with
             | Turn (tick, _) ->
                 let economy = totalEconomy player
@@ -253,12 +254,20 @@ let main argv =
                     science = totalResearch player
                     terraformingLevel = player.terraformingLevel
                     worldBuilders = Seq.filter (fun p -> p.worldBuilder) player.planets |> Seq.length
+                    planetCount = List.length player.planets
                 }
                 Some({ tick = tick; data = data })
             | _ -> None
             
-    let logs1 = simulate player turns snapshot worldbuilderBot
-    let logs2 = simulate player turns snapshot normalBot
+    let expand next tickInfo player =
+        match tickInfo with
+            | Turn _ -> 
+                let newPlanets = List.init 2 (fun _ -> { terraform = terraformingStart; economy = 0; research = 0; worldBuilder = false })
+                next tickInfo { player with planets = newPlanets @ player.planets }
+            | _ -> next tickInfo player
+            
+    let logs1 = simulate player turns snapshot (expand worldbuilderBot)
+    let logs2 = simulate player turns snapshot (expand normalBot)
     let diagramTicks = diagram (fun (e: Entry<_>) -> e.tick)
     let infrastructurePlot = plot "Infrastructure" [
         diagramTicks (fun e -> e.data.economy) logs1 "Economy (with WBs)"
@@ -275,5 +284,9 @@ let main argv =
     let wbPlot = plot "World Builders" [
         diagramTicks (fun e -> e.data.worldBuilders) logs1 "World builders"
     ]
-    [ infrastructurePlot; avgPricePlot; wbPlot ] |> Chart.ShowAll
+    let planetPlot = plot "Planets" [
+        diagramTicks (fun e -> e.data.planetCount) logs1 "Planets (with WB)"
+        diagramTicks (fun e -> e.data.planetCount) logs2 "Planets (without WB)"
+    ]
+    [ infrastructurePlot; avgPricePlot; wbPlot; planetPlot ] |> Chart.ShowAll
     0
